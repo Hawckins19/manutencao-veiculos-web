@@ -1,9 +1,9 @@
-# Gestão e manutenção de veículos — distribuição
+# Manutenção — base de teste 0.2
 
-Repositório reservado aos ficheiros públicos da aplicação web.
+Distribuição experimental de uma aplicação de manutenção de veículos. Utilizar apenas dados fictícios.
 
-A aplicação encontra-se em preparação. Ainda não existe uma versão funcional publicada por este projeto.
+Abrir `proof/` no site GitHub Pages. Registos locais, backup JSON e sincronização Dropbox manual opcional. A autorização e os dados ficam no navegador e na conta Dropbox do utilizador, não neste repositório.
 
-Este repositório não deve conter dados de utilizadores, histórico de manutenção, faturas, fotografias pessoais, manuais privados, backups ou credenciais.
+Esta versão ainda exige testes reais de autorização e sincronização em Android/PC. Não é a aplicação definitiva. Sem anexos, edição ou eliminação. Guardar backups independentes.
 
-Apenas serão adicionados ficheiros de distribuição revistos. O código executado no navegador é público. Dados pessoais serão geridos separadamente pela aplicação, quando essas funcionalidades estiverem implementadas.
+Para atualizar: abrir online, atualizar a página, fechar todos os separadores da aplicação e voltar a abrir. Confirmar a indicação LABORATÓRIO 0.2. Não limpar o armazenamento do site.
