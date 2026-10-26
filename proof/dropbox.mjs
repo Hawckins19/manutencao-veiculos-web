@@ -73,6 +73,6 @@ export async function synchronize({remote,readLocal,addLocal}){
     try{await remote.upload(combined,cloud.rev);}catch(e){if(e.concurrent&&attempt<2)continue;throw e;}
     // Uma transação local relê o estado atual, preservando adições feitas noutro separador.
     const final=await addLocal(combined);
-    return {data:final,pending:final.records.length!==combined.records.length};
+    return {data:final,pending:JSON.stringify(final)!==JSON.stringify(combined)};
   }
 }

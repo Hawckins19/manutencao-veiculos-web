@@ -1,9 +1,7 @@
-# Manutenção — base de teste 0.2
+# Manutenção — Oficina 0.3
 
-Distribuição experimental de uma aplicação de manutenção de veículos. Utilizar apenas dados fictícios.
+Versão de desenvolvimento com ficha de veículo, histórico, registo de intervenções, despesas, backups e sincronização Dropbox manual. Usar dados fictícios.
 
-Abrir `proof/` no site GitHub Pages. Registos locais, backup JSON e sincronização Dropbox manual opcional. A autorização e os dados ficam no navegador e na conta Dropbox do utilizador, não neste repositório.
+Abrir `proof/`. Atualizar ambos os dispositivos para OFICINA 0.3 antes de sincronizar. Configurar a ficha num dispositivo e sincronizar no outro antes de a editar aí. Backups antigos são aceites; versões antigas da aplicação não leem o novo formato.
 
-Esta versão ainda exige testes reais de autorização e sincronização em Android/PC. Não é a aplicação definitiva. Sem anexos, edição ou eliminação. Guardar backups independentes.
-
-Para atualizar: abrir online, atualizar a página, fechar todos os separadores da aplicação e voltar a abrir. Confirmar a indicação LABORATÓRIO 0.2. Não limpar o armazenamento do site.
+Plano preventivo, anexos e gestão de vários veículos ainda não implementados. Não limpar o armazenamento do navegador. Exportar backups independentes. A pasta `design/` conserva as propostas visuais.

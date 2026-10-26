@@ -1,60 +1,33 @@
-import {connect, finishAuth, session, disconnect, createRemote, synchronize} from './dropbox.mjs';
-import {empty, validate, parseMoney, merge} from './model.mjs';
-import {read, addRecords} from './storage.mjs';
-const $=id=>document.getElementById(id), form=$('record-form');
-let pending=null;
+import {empty,validate,parseMoney,merge,vehicle,vehicleChange,createId} from './model.mjs';
+import {read,addRecords,readPrevious} from './storage.mjs';
+import {connect,finishAuth,session,disconnect,createRemote,synchronize} from './dropbox.mjs';
+const $=id=>document.getElementById(id),form=$('record-form'),vehicleForm=$('vehicle-form');
+let state=empty(),pending=null,selection=0,syncing=false,profileBase=null;
 const money=new Intl.NumberFormat('pt-PT',{style:'currency',currency:'EUR'});
+const titles={inicio:['A tua garagem.','O essencial do teu veículo, num só olhar.'],historico:['O histórico conta.','Intervenções, quilometragens e despesas.'],manutencao:['Cuidar antes de avariar.','Informação técnica por validar.'],definicoes:['À tua maneira.','Ligação, cópias de segurança e recuperação.']};
+function page(name){if(!titles[name])name='inicio';for(const view of document.querySelectorAll('[data-view]'))view.hidden=view.dataset.view!==name;for(const button of document.querySelectorAll('[data-page]')){if(button.dataset.page===name)button.setAttribute('aria-current','page');else button.removeAttribute('aria-current');}$('page-title').textContent=titles[name][0];$('page-subtitle').textContent=titles[name][1];}
 function message(text,error=false){$('message').textContent=text;$('message').classList.toggle('error',error);}
-function render(data){
-  $('records').replaceChildren();
-  $('count').textContent=data.records.length ? `${data.records.length} registo(s) guardado(s) neste dispositivo.` : 'Ainda sem registos. Adiciona um exemplo fictício para começar.';
-  for(const r of [...data.records].sort((a,b)=>b.date.localeCompare(a.date))){
-    const li=document.createElement('li'), title=document.createElement('strong'), meta=document.createElement('p'), notes=document.createElement('p');
-    title.textContent=r.service;
-    meta.textContent=`${r.date.split('-').reverse().join('/')} · ${r.km.toLocaleString('pt-PT')} km · ${r.cents===null?'Custo desconhecido':money.format(r.cents/100)}`;
-    notes.textContent=r.notes;li.append(title,meta,notes);$('records').append(li);
-  }
-}
+function markPending(){$('sync-status').textContent='Há alterações locais. Sincroniza quando tiveres ligação.';$('cloud-state').textContent='Alterações locais · sincronização pendente';}
+function rows(target,records){target.replaceChildren();if(!records.length){const li=document.createElement('li');li.className='empty';li.textContent='Sem intervenções para mostrar.';target.append(li);return;}for(const r of records){const li=document.createElement('li'),title=document.createElement('strong'),meta=document.createElement('p'),notes=document.createElement('p');title.textContent=r.service;meta.textContent=`${r.date.split('-').reverse().join('/')} · ${r.km.toLocaleString('pt-PT')} km · ${r.cents===null?'Custo desconhecido':money.format(r.cents/100)}`;notes.textContent=r.notes;li.append(title,meta,notes);target.append(li);}}
+function render(data){state=validate(data);const v=vehicle(state);$('vehicle-name').textContent=v?.name||'Configura o teu veículo';$('vehicle-detail').textContent=v?[v.kind,v.year||'Ano por confirmar'].join(' · '):'A ficha será incluída nos backups e na sincronização.';$('edit-vehicle').textContent=v?'Editar ficha →':'Configurar ficha →';const all=[...state.records].sort((a,b)=>b.date.localeCompare(a.date)||b.km-a.km);const last=all[0];$('last-km').textContent=last?last.km.toLocaleString('pt-PT')+' km':'—';$('last-date').textContent=last?'Intervenção de '+last.date.split('-').reverse().join('/'):'Ainda sem leitura conhecida';$('total-count').textContent=all.length;const year=String(new Date().getFullYear()),annual=all.filter(r=>r.date.startsWith(year+'-')),unknown=annual.filter(r=>r.cents===null).length;$('year-label').textContent='Despesas em '+year;$('year-total').textContent=money.format(annual.reduce((sum,r)=>sum+(r.cents??0),0)/100);$('unknown-count').textContent=unknown?`${unknown} custo(s) desconhecido(s), excluído(s)`:'Total dos valores conhecidos';rows($('recent-records'),all.slice(0,3));const search=$('search').value.toLocaleLowerCase('pt-PT'),filtered=all.filter(r=>(r.service+' '+r.notes).toLocaleLowerCase('pt-PT').includes(search));rows($('records'),filtered);$('count').textContent=`${filtered.length} de ${all.length} intervenção(ões).`;}
 async function refresh(){render(await read());}
-function download(data){
-  const blob=new Blob([JSON.stringify(validate(data),null,2)],{type:'application/json'}), url=URL.createObjectURL(blob), a=document.createElement('a');
-  a.href=url;a.download=`manutencao-teste-${new Date().toISOString().replace(/[:.]/g,'-')}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),60000);
-}
-form.addEventListener('submit',async e=>{e.preventDefault();const button=form.querySelector('button');button.disabled=true;try{
-  const values=new FormData(form);const data=empty();
-  data.records.push({id:crypto.randomUUID(),date:values.get('date'),km:Number(values.get('km')),cents:parseMoney(values.get('cost')),service:values.get('service'),notes:values.get('notes')});
-  render(await addRecords(data));form.reset();markPending();message('Registo guardado neste dispositivo. Exporta um backup para o proteger.');
-}catch(e){message(e.message,true);}finally{button.disabled=false;}});
-$('export').onclick=async()=>{try{download(await read());message('Backup preparado para descarregar. Confirma que o ficheiro ficou guardado.');}catch(e){message(e.message,true);}};
-function cancel(){pending=null;$('preview').hidden=true;$('import').value='';}
-$('cancel').onclick=()=>{cancel();message('Importação cancelada. Os dados não foram alterados.');};
-let selection=0;
-$('import').onchange=async()=>{const request=++selection;pending=null;$('preview').hidden=true;try{
-  const file=$('import').files[0];if(!file)return;if(file.size>5*1024*1024)throw new Error('O ficheiro excede o limite de 5 MB desta base de teste.');
-  const data=validate(JSON.parse(await file.text())), current=await read(), combined=merge(current,data);
-  if(request!==selection)return;pending=data;
-  $('summary').textContent=`Ficheiro válido: ${data.records.length} registo(s). Serão acrescentados ${combined.records.length-current.records.length}.`;
-  $('preview').hidden=false;message('Revê o resumo antes de confirmar.');
-}catch(e){if(request===selection)message(e.message,true);}};
-$('confirm').onclick=async()=>{if(!pending)return;$('confirm').disabled=true;try{render(await addRecords(pending));cancel();markPending();message('Importação concluída. Os registos existentes foram preservados.');}catch(e){message(e.message,true);}finally{$('confirm').disabled=false;}};
-$('refresh').onclick=()=>refresh().catch(e=>message(e.message,true));
-function network(){$('network').textContent=navigator.onLine?'Ligação disponível · dados locais':'Sem ligação · dados locais';}network();window.addEventListener('online',network);window.addEventListener('offline',network);
-refresh().catch(e=>message('Armazenamento indisponível: '+e.message,true));
-if('serviceWorker' in navigator){navigator.serviceWorker.register('./sw.js',{scope:'./'}).then(()=>navigator.serviceWorker.ready).then(()=>{$('offline').textContent='Recursos offline preparados';}).catch(()=>{$('offline').textContent='Modo offline não preparado';});}else $('offline').textContent='Modo offline não suportado';
-
-let syncing=false;
-function cloudUI(){const linked=!!session();$('cloud-state').textContent=linked?'Dropbox: ligado neste separador':'Dropbox: não ligado ou sessão expirada';$('sync').disabled=!linked||syncing;$('disconnect').disabled=!linked||syncing;$('connect').disabled=syncing;}
-function markPending(){$('sync-status').textContent='Há alterações locais. Carrega em “Sincronizar agora” quando tiveres ligação.';}
-$('connect').onclick=()=>connect().catch(e=>message(e.message,true));
-$('disconnect').onclick=()=>{disconnect();cloudUI();$('sync-status').textContent='Sessão removida deste separador. Os dados locais e no Dropbox foram mantidos.';};
-$('sync').onclick=async()=>{
-  const active=session();if(!active){cloudUI();message('Volta a ligar ao Dropbox.',true);return;}
-  if(!navigator.onLine){message('Sem internet. Os registos continuam guardados localmente.',true);return;}
-  syncing=true;cloudUI();form.querySelector('button').disabled=true;$('confirm').disabled=true;$('sync-status').textContent='A sincronizar…';
-  try{const result=await synchronize({remote:createRemote(active.token),readLocal:read,addLocal:addRecords});render(result.data);$('sync-status').textContent=result.pending?'Foram detetadas novas adições locais. Sincroniza novamente.':'Sincronização concluída às '+new Date().toLocaleTimeString('pt-PT')+'. Volta a sincronizar para procurar alterações noutros dispositivos.';message('Os registos foram enviados e recebidos.');}
-  catch(e){$('sync-status').textContent='Sincronização não concluída. Podes voltar a tentar; os dados locais foram mantidos.';message(e.name==='TimeoutError'?'O pedido demorou demasiado. Volta a tentar.':e.message,true);}
-  finally{syncing=false;cloudUI();form.querySelector('button').disabled=false;$('confirm').disabled=false;}
-};
-cloudUI();
-finishAuth().then(done=>{cloudUI();if(done)message('Dropbox ligado. Carrega em “Sincronizar agora” para enviar e receber os registos de teste.');}).catch(e=>{cloudUI();message(e.message,true);});
-window.addEventListener('focus',cloudUI);
+function download(data,raw=false){const blob=new Blob([JSON.stringify(raw?data:validate(data),null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=`manutencao-${raw?'antes-atualizacao-':''}${new Date().toISOString().replace(/[:.]/g,'-')}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),60000);}
+document.addEventListener('click',e=>{const nav=e.target.closest('[data-page],[data-go]');if(nav){page(nav.dataset.page||nav.dataset.go);window.scrollTo({top:0,behavior:'smooth'});}const close=e.target.closest('[data-close]');if(close)close.closest('dialog').close();});
+window.addEventListener('hashchange',()=>page(location.hash.slice(1)));page(location.hash.slice(1)||'inicio');
+$('new-record').onclick=()=>{$('record-error').textContent='';$('record-dialog').showModal();};
+$('edit-vehicle').onclick=async()=>{try{const current=await read(),v=vehicle(current);profileBase=current;vehicleForm.elements.name.value=v?.name||'';vehicleForm.elements.kind.value=v?.kind||'mota';vehicleForm.elements.year.value=v?.year??'';$('vehicle-error').textContent='';$('vehicle-dialog').showModal();}catch(e){message(e.message,true);}};
+vehicleForm.onsubmit=async e=>{e.preventDefault();const button=vehicleForm.querySelector('[type=submit]');button.disabled=true;try{const f=new FormData(vehicleForm),data=vehicleChange(profileBase,{name:f.get('name'),kind:f.get('kind'),year:f.get('year')?Number(f.get('year')):null},createId());render(await addRecords(data));$('vehicle-dialog').close();markPending();message('Ficha guardada neste dispositivo. Sincroniza para a enviar ao outro dispositivo.');}catch(e){$('vehicle-error').textContent=e.message;}finally{button.disabled=false;}};
+form.onsubmit=async e=>{e.preventDefault();const button=form.querySelector('[type=submit]');button.disabled=true;try{const f=new FormData(form),data=empty();data.records.push({id:createId(),date:f.get('date'),km:Number(f.get('km')),cents:parseMoney(f.get('cost')),service:f.get('service'),notes:f.get('notes')});render(await addRecords(data));form.reset();$('record-dialog').close();markPending();message('Intervenção guardada. Exporta um backup para a proteger.');}catch(e){$('record-error').textContent=e.message;}finally{button.disabled=false;}};
+$('search').oninput=()=>render(state);$('refresh').onclick=()=>refresh().catch(e=>message(e.message,true));
+$('export').onclick=async()=>{try{download(await read());message('Backup preparado. Confirma que o ficheiro ficou guardado.');}catch(e){message(e.message,true);}};
+$('previous-backup').onclick=async()=>{try{const old=await readPrevious();if(!old){message('Não existe uma cópia anterior: este navegador começou já com o novo formato.');return;}download(old,true);message('Cópia anterior à atualização preparada para descarregar.');}catch(e){message(e.message,true);}};
+function cancel(){selection++;pending=null;$('preview').hidden=true;$('import').value='';}
+$('cancel').onclick=()=>{cancel();message('Importação cancelada. Nada foi alterado.');};
+$('import').onchange=async()=>{const request=++selection;pending=null;$('preview').hidden=true;try{const f=$('import').files[0];if(!f)return;if(f.size>5*1024*1024)throw new Error('O ficheiro excede 5 MB.');const data=validate(JSON.parse(await f.text())),current=await read(),combined=merge(current,data);if(request!==selection)return;pending=data;$('summary').textContent=`Backup válido: ${data.records.length} intervenção(ões). Serão acrescentadas ${combined.records.length-current.records.length}. Ficha: ${vehicle(data)?.name||'não incluída'}.`;$('preview').hidden=false;message('Revê o resumo antes de confirmar.');}catch(e){if(request===selection)message(e.message,true);}};
+$('confirm').onclick=async()=>{if(!pending)return;$('confirm').disabled=true;try{render(await addRecords(pending));cancel();markPending();message('Backup importado. Os registos existentes foram preservados.');}catch(e){message(e.message,true);}finally{$('confirm').disabled=false;}};
+function cloudUI(){const linked=!!session();$('cloud-state').textContent=linked?'Dropbox ligado · sincronização manual':'Dropbox não ligado ou sessão expirada';$('sync').disabled=!linked||syncing;$('disconnect').disabled=!linked||syncing;$('connect').disabled=syncing;}
+$('connect').onclick=()=>connect().catch(e=>message(e.message,true));$('disconnect').onclick=()=>{disconnect();cloudUI();$('sync-status').textContent='Sessão removida deste separador. Os dados foram mantidos.';};
+$('sync').onclick=async()=>{const active=session();if(!active){cloudUI();message('Volta a ligar ao Dropbox.',true);return;}if(!navigator.onLine){message('Sem internet. Os dados continuam guardados localmente.',true);return;}syncing=true;cloudUI();$('sync-status').textContent='A sincronizar…';try{const result=await synchronize({remote:createRemote(active.token),readLocal:read,addLocal:addRecords});render(result.data);$('sync-status').textContent=result.pending?'Há novas alterações locais. Sincroniza novamente.':'Sincronização concluída às '+new Date().toLocaleTimeString('pt-PT')+'. Sincroniza também no outro dispositivo.';message('Ficha e intervenções sincronizadas.');}catch(e){$('sync-status').textContent='Sincronização não concluída. Os dados locais foram preservados.';message(e.name==='TimeoutError'?'O pedido demorou demasiado. Tenta novamente.':e.message,true);}finally{syncing=false;cloudUI();}};
+function network(){$('network').textContent=navigator.onLine?'Ligação disponível · dados locais':'Sem ligação · dados locais';}network();window.addEventListener('online',network);window.addEventListener('offline',network);cloudUI();
+refresh().catch(e=>message('Armazenamento indisponível: '+e.message,true));finishAuth().then(done=>{cloudUI();if(done){page('definicoes');message('Dropbox ligado. Carrega em “Sincronizar agora”.');}}).catch(e=>{page('definicoes');cloudUI();message(e.message,true);});window.addEventListener('focus',cloudUI);
+if('serviceWorker' in navigator)navigator.serviceWorker.register('./sw.js',{scope:'./'}).then(()=>navigator.serviceWorker.ready).then(()=>{$('offline').textContent='Recursos offline preparados';}).catch(()=>{$('offline').textContent='Modo offline não preparado';});else $('offline').textContent='Modo offline não suportado';
